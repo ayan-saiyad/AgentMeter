@@ -1,0 +1,20 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: #09111f;
+  color: #eef2ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  margin: 0 auto;
+  max-width: 72rem;
+  padding: 4rem 2rem;
+}

@@ -1,0 +1,12 @@
+.git
+.github
+.next
+coverage
+dist
+k6-results
+node_modules
+test-results
+tmp
+*.log
+.env*
+!.env.example

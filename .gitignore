@@ -1,12 +1,14 @@
 # Dependencies and package-manager state
 node_modules/
 .pnpm-store/
+.npm-cache/
 
 # Build output
 .next/
 dist/
 coverage/
 *.tsbuildinfo
+out/
 
 # Local configuration and secrets
 .env
@@ -30,3 +32,7 @@ k6-results/
 .idea/
 .vscode/
 
+# Local infrastructure
+postgres-data/
+redis-data/
+.kube/
