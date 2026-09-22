@@ -163,4 +163,33 @@ integration("atomic admission", () => {
     expect(state.reservedMicrodollars).toBe(0n);
     expect(state.spentMicrodollars).toBe(400_000n);
   });
+
+  it("restores durable active state after projection loss", async () => {
+    const recoveryTenant = `test-${randomUUID()}`;
+    const recoveryPeriod = randomUUID();
+    const runId = randomUUID();
+    await control.initializeBudget({
+      active: 1,
+      budgetPeriodId: recoveryPeriod,
+      concurrency: 2,
+      limitMicrodollars: 1_000_000n,
+      reservedMicrodollars: 250_000n,
+      tenantId: recoveryTenant,
+    });
+    await control.restoreRun({
+      amountMicrodollars: 250_000n,
+      budgetPeriodId: recoveryPeriod,
+      expiresAt: Date.now() + 60_000,
+      idempotencyDigest: "restored-request",
+      idempotencyTtlMs: 60_000,
+      runId,
+      status: "RUNNING",
+      tenantId: recoveryTenant,
+    });
+    expect(await control.runState(recoveryTenant, runId)).toMatchObject({
+      amount: "250000",
+      budget_period_id: recoveryPeriod,
+      status: "RUNNING",
+    });
+  });
 });

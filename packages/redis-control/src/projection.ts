@@ -14,6 +14,7 @@ const activeStatuses = [
 export async function initializeCurrentBudgets(
   database: PrismaClient,
   control: RedisControl,
+  options: { force?: boolean; leaseTtlMs?: number } = {},
 ): Promise<void> {
   const now = new Date();
   const periods = await database.budgetPeriod.findMany({
@@ -26,7 +27,8 @@ export async function initializeCurrentBudgets(
   });
 
   for (const period of periods) {
-    if (await control.hasBudget(period.tenantId, period.id)) continue;
+    if (!options.force && (await control.hasBudget(period.tenantId, period.id)))
+      continue;
     const targets = period.budget.applicationId
       ? [
           { targetType: "TENANT", targetId: null },
@@ -46,7 +48,13 @@ export async function initializeCurrentBudgets(
           budgetPeriodId: period.id,
           status: { in: [...activeStatuses] },
         },
-        select: { reservedMicrodollars: true },
+        select: {
+          executionOwner: true,
+          id: true,
+          idempotencyDigest: true,
+          reservedMicrodollars: true,
+          status: true,
+        },
       }),
       database.policyBinding.findFirst({
         where: {
@@ -74,5 +82,21 @@ export async function initializeCurrentBudgets(
       spentMicrodollars: settled._sum.actualMicrodollars ?? 0n,
       tenantId: period.tenantId,
     });
+    const leaseExpiresAt = Date.now() + (options.leaseTtlMs ?? 90_000);
+    for (const run of active) {
+      await control.restoreRun({
+        amountMicrodollars: run.reservedMicrodollars,
+        budgetPeriodId: period.id,
+        expiresAt: leaseExpiresAt,
+        idempotencyDigest: run.idempotencyDigest,
+        idempotencyTtlMs: 24 * 60 * 60 * 1_000,
+        ...(run.executionOwner ? { owner: run.executionOwner } : {}),
+        runId: run.id,
+        status: ["RESERVED", "RUNNING"].includes(run.status)
+          ? run.status
+          : "RECONCILING",
+        tenantId: period.tenantId,
+      });
+    }
   }
 }

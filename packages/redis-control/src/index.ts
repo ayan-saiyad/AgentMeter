@@ -171,6 +171,7 @@ export class RedisControl {
           String(input.leaseTtlMs),
           String(input.idempotencyTtlMs),
           input.owner,
+          input.budgetPeriodId,
         ],
       ),
     );
@@ -184,6 +185,39 @@ export class RedisControl {
     if (response[5]) result.fence = Number(response[5]);
     if (response[6]) result.expiresAt = Number(response[6]);
     return result;
+  }
+
+  async restoreRun(input: {
+    amountMicrodollars: bigint;
+    budgetPeriodId: string;
+    expiresAt: number;
+    fence?: number;
+    idempotencyDigest: string;
+    idempotencyTtlMs: number;
+    owner?: string;
+    runId: string;
+    status: string;
+    tenantId: string;
+  }): Promise<void> {
+    assertControlMoney(input.amountMicrodollars);
+    await this.call(
+      "agentmeter_restore_run",
+      [
+        keys.run(input.tenantId, input.runId),
+        keys.idempotency(input.tenantId, input.idempotencyDigest),
+        keys.leases(input.tenantId),
+      ],
+      [
+        input.runId,
+        input.amountMicrodollars.toString(),
+        input.status,
+        input.owner ?? "recovery",
+        String(input.fence ?? 1),
+        String(input.expiresAt),
+        input.budgetPeriodId,
+        String(input.idempotencyTtlMs),
+      ],
+    );
   }
 
   async markRunning(

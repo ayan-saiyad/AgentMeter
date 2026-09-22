@@ -70,6 +70,10 @@ export const providerRequestSchema = runRequestSchema.extend({
 export type ProviderRequest = z.infer<typeof providerRequestSchema>;
 
 export const providerEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("provider.started"),
+    providerRequestId: z.string(),
+  }),
   z.object({ type: z.literal("message.delta"), text: z.string() }),
   z.object({
     type: z.literal("tool.call"),
@@ -91,6 +95,15 @@ export const providerEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ProviderEvent = z.infer<typeof providerEventSchema>;
+
+export const providerUsageSchema = z.object({
+  cachedTokens: z.number().int().nonnegative().default(0),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  toolCalls: z.number().int().nonnegative().default(0),
+});
+
+export type ProviderUsage = z.infer<typeof providerUsageSchema>;
 
 export interface RunEvent {
   data: Record<string, unknown>;

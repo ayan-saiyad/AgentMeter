@@ -17,6 +17,43 @@ interface ClaimedEvent {
   payload: Prisma.JsonValue;
 }
 
+const activeStatuses = [
+  "RESERVED",
+  "RUNNING",
+  "ABORTED",
+  "FAILED",
+  "EXPIRED",
+  "RECONCILING",
+] as const;
+
+async function projectionContainsDurableState(
+  database: PrismaClient,
+  redis: RedisControl,
+  tenantId: string,
+  budgetPeriodId: string,
+): Promise<boolean> {
+  const [state, settled, active] = await Promise.all([
+    redis.budgetState(tenantId, budgetPeriodId),
+    database.settlement.aggregate({
+      where: { run: { budgetPeriodId } },
+      _sum: { actualMicrodollars: true },
+    }),
+    database.agentRun.findMany({
+      where: {
+        budgetPeriodId,
+        status: { in: [...activeStatuses] },
+      },
+      select: { reservedMicrodollars: true },
+    }),
+  ]);
+  return (
+    state.spentMicrodollars === (settled._sum.actualMicrodollars ?? 0n) &&
+    state.reservedMicrodollars ===
+      active.reduce((total, run) => total + run.reservedMicrodollars, 0n) &&
+    state.active === active.length
+  );
+}
+
 export async function claimOutboxBatch(
   database: PrismaClient,
   workerId: string,
@@ -73,7 +110,18 @@ export async function processOutboxBatch(
         settlementId: payload.settlementId,
         tenantId: payload.tenantId,
       });
-      if (!["SETTLED", "ALREADY_APPLIED"].includes(result[0] ?? "")) {
+      const recoveredProjection =
+        result[0] === "MISSING" &&
+        (await projectionContainsDurableState(
+          database,
+          redis,
+          payload.tenantId,
+          payload.budgetPeriodId,
+        ));
+      if (
+        !recoveredProjection &&
+        !["SETTLED", "ALREADY_APPLIED"].includes(result[0] ?? "")
+      ) {
         throw new Error(`Redis settlement returned ${result.join(":")}`);
       }
       await database.outboxEvent.update({

@@ -28,6 +28,7 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { resolveAdmissionContext } from "./admission.js";
+import { digestToolArguments, executeManagedTool } from "./tools.js";
 
 export interface GatewayDependencies {
   apiKeyPepper: string;
@@ -102,6 +103,17 @@ function serializeRun(run: {
 
 export function buildGateway(dependencies?: GatewayDependencies) {
   const app = Fastify({ logger: loggerOptions });
+  const activeRuns = new Map<
+    string,
+    { controller: AbortController; tenantId: string }
+  >();
+  const metrics = {
+    active: 0,
+    completed: 0,
+    failed: 0,
+    rejected: 0,
+    started: 0,
+  };
   void app.register(cors, { origin: false });
   void app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
 
@@ -130,6 +142,29 @@ export function buildGateway(dependencies?: GatewayDependencies) {
         version: serviceVersion,
       });
     }
+  });
+
+  app.get("/metrics", (_request, reply) => {
+    const lines = [
+      "# HELP agentmeter_runs_total Admitted runtime requests.",
+      "# TYPE agentmeter_runs_total counter",
+      `agentmeter_runs_total ${metrics.started}`,
+      "# HELP agentmeter_runs_active Runtime requests executing in this gateway.",
+      "# TYPE agentmeter_runs_active gauge",
+      `agentmeter_runs_active ${metrics.active}`,
+      "# HELP agentmeter_runs_completed_total Durably settled runtime requests.",
+      "# TYPE agentmeter_runs_completed_total counter",
+      `agentmeter_runs_completed_total ${metrics.completed}`,
+      "# HELP agentmeter_runs_failed_total Runtime requests sent to reconciliation.",
+      "# TYPE agentmeter_runs_failed_total counter",
+      `agentmeter_runs_failed_total ${metrics.failed}`,
+      "# HELP agentmeter_admission_rejections_total Rejected admission requests.",
+      "# TYPE agentmeter_admission_rejections_total counter",
+      `agentmeter_admission_rejections_total ${metrics.rejected}`,
+    ];
+    return reply
+      .type("text/plain; version=0.0.4")
+      .send(`${lines.join("\n")}\n`);
   });
 
   if (dependencies) {
@@ -168,6 +203,41 @@ export function buildGateway(dependencies?: GatewayDependencies) {
       },
     );
 
+    app.post<{ Params: { runId: string } }>(
+      "/v1/runs/:runId/cancel",
+      async (request, reply) => {
+        const token = tokenFrom(request.headers);
+        if (!token)
+          throw new HttpError(401, "UNAUTHORIZED", "A runtime key is required");
+        const key = await findApiKey(
+          dependencies.database,
+          token,
+          dependencies.apiKeyPepper,
+        );
+        if (!key)
+          throw new HttpError(401, "UNAUTHORIZED", "Runtime key is invalid");
+        const run = await dependencies.database.agentRun.findFirst({
+          where: { id: request.params.runId, tenantId: key.tenantId },
+          select: { id: true, status: true },
+        });
+        if (!run)
+          throw new HttpError(404, "RUN_NOT_FOUND", "Run was not found");
+        const active = activeRuns.get(run.id);
+        if (active?.tenantId === key.tenantId) {
+          active.controller.abort(new Error("USER_CANCELLED"));
+          return reply.code(202).send({ runId: run.id, status: "CANCELLING" });
+        }
+        if (["SETTLED", "CANCELLED"].includes(run.status)) {
+          return { runId: run.id, status: run.status };
+        }
+        throw new HttpError(
+          409,
+          "RUN_NOT_LOCAL",
+          "The run is not executing in this gateway",
+        );
+      },
+    );
+
     app.post("/v1/runs", async (request, reply) => {
       const token = tokenFrom(request.headers);
       if (!token)
@@ -201,6 +271,7 @@ export function buildGateway(dependencies?: GatewayDependencies) {
         body.model,
       );
       if (!context) {
+        metrics.rejected += 1;
         await dependencies.database.admissionEvent.create({
           data: {
             tenantId: key.tenantId,
@@ -219,6 +290,7 @@ export function buildGateway(dependencies?: GatewayDependencies) {
 
       const policyDecision = evaluatePolicy(context.policy.rules, body);
       if (!policyDecision.allowed) {
+        metrics.rejected += 1;
         await dependencies.database.admissionEvent.create({
           data: {
             tenantId: key.tenantId,
@@ -244,6 +316,7 @@ export function buildGateway(dependencies?: GatewayDependencies) {
         price: context.modelPrice.price,
       });
       if (reservation > BigInt(context.policy.rules.maxRunMicrodollars)) {
+        metrics.rejected += 1;
         await dependencies.database.admissionEvent.create({
           data: {
             tenantId: key.tenantId,
@@ -275,6 +348,7 @@ export function buildGateway(dependencies?: GatewayDependencies) {
       });
 
       if (reservationResult.decision === "REJECTED") {
+        metrics.rejected += 1;
         await dependencies.database.admissionEvent.create({
           data: {
             tenantId: key.tenantId,
@@ -396,7 +470,14 @@ export function buildGateway(dependencies?: GatewayDependencies) {
       });
 
       const controller = new AbortController();
+      activeRuns.set(reservationResult.runId, {
+        controller,
+        tenantId: key.tenantId,
+      });
+      metrics.active += 1;
+      metrics.started += 1;
       let clientDisconnected = false;
+      let managedToolCalls = 0;
       let sequence = 0;
       let finalUsage: Extract<ProviderEvent, { type: "usage.final" }> | null =
         null;
@@ -466,8 +547,76 @@ export function buildGateway(dependencies?: GatewayDependencies) {
           { ...body, runId: reservationResult.runId },
           controller.signal,
         )) {
-          if (event.type === "message.delta") {
+          if (event.type === "provider.started") {
+            await dependencies.database.agentRun.update({
+              where: { id: reservationResult.runId },
+              data: { providerRequestId: event.providerRequestId },
+            });
+            await emit("provider.started", {
+              providerRequestId: event.providerRequestId,
+            });
+          } else if (event.type === "message.delta") {
             await emit(event.type, { text: event.text });
+          } else if (event.type === "tool.call") {
+            managedToolCalls += 1;
+            const allowed =
+              body.tools.includes(event.name) &&
+              context.policy.rules.allowedTools.includes(event.name) &&
+              managedToolCalls <= context.policy.rules.maxToolCalls;
+            const invocation =
+              await dependencies.database.toolInvocation.create({
+                data: {
+                  tenantId: key.tenantId,
+                  runId: reservationResult.runId,
+                  sequence: managedToolCalls,
+                  toolName: event.name,
+                  decision: allowed ? "ALLOWED" : "DENIED",
+                  argumentsDigest: digestToolArguments(event.arguments),
+                  ...(!allowed ? { outcome: "POLICY_DENIED" } : {}),
+                },
+              });
+            if (!allowed) {
+              await emit("tool.denied", {
+                callId: event.callId,
+                name: event.name,
+              });
+              throw new Error("TOOL_POLICY_DENIED");
+            }
+            const startedAt = Date.now();
+            try {
+              await emit("tool.started", {
+                callId: event.callId,
+                name: event.name,
+              });
+              const result = await executeManagedTool(
+                event.name,
+                event.arguments,
+              );
+              await dependencies.database.toolInvocation.update({
+                where: { id: invocation.id },
+                data: {
+                  completedAt: new Date(),
+                  durationMs: Date.now() - startedAt,
+                  outcome: "COMPLETED",
+                },
+              });
+              await emit("tool.completed", {
+                callId: event.callId,
+                name: event.name,
+                result,
+              });
+            } catch (error) {
+              await dependencies.database.toolInvocation.update({
+                where: { id: invocation.id },
+                data: {
+                  completedAt: new Date(),
+                  durationMs: Date.now() - startedAt,
+                  outcome:
+                    error instanceof Error ? error.message : "TOOL_FAILED",
+                },
+              });
+              throw error;
+            }
           } else if (event.type === "usage.final") {
             finalUsage = event;
             await emit("usage.checkpoint", {
@@ -481,10 +630,6 @@ export function buildGateway(dependencies?: GatewayDependencies) {
               where: { id: reservationResult.runId },
               data: { providerRequestId: event.providerRequestId },
             });
-          } else {
-            throw new Error(
-              `Tool call ${event.name} requires managed execution`,
-            );
           }
         }
         if (!finalUsage) throw new Error("FINAL_USAGE_UNAVAILABLE");
@@ -513,6 +658,7 @@ export function buildGateway(dependencies?: GatewayDependencies) {
           actualMicrodollars: actual.toString(),
           settlementId: settlement.id,
         });
+        metrics.completed += 1;
       } catch (error) {
         const code =
           controller.signal.reason instanceof Error
@@ -545,8 +691,11 @@ export function buildGateway(dependencies?: GatewayDependencies) {
           reservationResult.runId,
           code,
         );
+        metrics.failed += 1;
         if (!clientDisconnected) await emit("run.failed", { code });
       } finally {
+        activeRuns.delete(reservationResult.runId);
+        metrics.active = Math.max(0, metrics.active - 1);
         clearInterval(renewal);
         clearTimeout(deadline);
         reply.raw.off("close", onClose);

@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "@agentmeter/config": "*",
+    "@agentmeter/contracts": "*",
     "@agentmeter/database": "*",
+    "@agentmeter/policy": "*",
+    "@agentmeter/providers": "*",
     "@agentmeter/redis-control": "*",
     "zod": "4.1.11"
   }

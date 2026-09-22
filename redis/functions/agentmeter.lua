@@ -86,6 +86,7 @@ redis.register_function('agentmeter_reserve_run', function(keys, args)
   redis.call('HINCRBY', budget_key, 'active', 1)
   redis.call('HSET', run_key,
     'run_id', run_id,
+    'budget_period_id', args[6],
     'amount', tostring(amount),
     'status', 'RESERVED',
     'owner', owner,
@@ -95,6 +96,37 @@ redis.register_function('agentmeter_reserve_run', function(keys, args)
   redis.call('ZADD', leases_key, expires_at, run_id)
   redis.call('SET', idem_key, encode_idempotency(run_id, 'ACCEPTED', 'RESERVED', ''), 'PX', idem_ttl_ms)
   return {'ACCEPTED', run_id, '1', 'RESERVED', '', '1', tostring(expires_at)}
+end)
+
+redis.register_function('agentmeter_restore_run', function(keys, args)
+  local run_key = keys[1]
+  local idem_key = keys[2]
+  local leases_key = keys[3]
+  local run_id = args[1]
+  local amount = args[2]
+  local status = args[3]
+  local owner = args[4]
+  local fence = args[5]
+  local expires_at = tonumber(args[6])
+  local budget_period_id = args[7]
+  local idem_ttl_ms = tonumber(args[8])
+
+  redis.call('HSET', run_key,
+    'run_id', run_id,
+    'budget_period_id', budget_period_id,
+    'amount', amount,
+    'status', status,
+    'owner', owner,
+    'fence', fence,
+    'lease_expires_at', tostring(expires_at),
+    'settlement_id', '')
+  redis.call('SET', idem_key, encode_idempotency(run_id, 'ACCEPTED', status, ''), 'PX', idem_ttl_ms)
+  if status == 'RESERVED' or status == 'RUNNING' then
+    redis.call('ZADD', leases_key, expires_at, run_id)
+  else
+    redis.call('ZREM', leases_key, run_id)
+  end
+  return {'RESTORED'}
 end)
 
 redis.register_function('agentmeter_mark_running', function(keys, args)

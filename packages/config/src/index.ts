@@ -19,6 +19,13 @@ export const gatewayConfigSchema = commonSchema.extend({
 });
 
 export const workerConfigSchema = commonSchema.extend({
+  LEASE_SWEEP_MS: z.coerce.number().int().positive().default(5_000),
+  RECONCILIATION_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(24 * 60 * 60 * 1_000),
+  SIMULATOR_URL: z.string().url().default("http://localhost:4100"),
   WORKER_POLL_MS: z.coerce.number().int().positive().default(1_000),
 });
 
