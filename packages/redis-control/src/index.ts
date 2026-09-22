@@ -84,6 +84,15 @@ export interface BudgetState {
   spentMicrodollars: bigint;
 }
 
+export interface LiveEvent {
+  data: string;
+  id: string;
+  runId: string;
+  sequence: string;
+  timestamp: string;
+  type: string;
+}
+
 export interface ReservationInput {
   amountMicrodollars: bigint;
   budgetPeriodId: string;
@@ -374,6 +383,32 @@ export class RedisControl {
     return response;
   }
 
+  async recentLiveEvents(tenantId: string, limit = 30): Promise<LiveEvent[]> {
+    const response: unknown = await this.client.sendCommand([
+      "XREVRANGE",
+      keys.live(tenantId),
+      "+",
+      "-",
+      "COUNT",
+      String(limit),
+    ]);
+    if (!Array.isArray(response)) return [];
+    return response.flatMap((entry) => {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string") return [];
+      const fields = stringRecord(entry[1]);
+      return [
+        {
+          data: fields.data ?? "{}",
+          id: entry[0],
+          runId: fields.runId ?? "",
+          sequence: fields.sequence ?? "0",
+          timestamp: fields.timestamp ?? "",
+          type: fields.type ?? "unknown",
+        },
+      ];
+    });
+  }
+
   private async call(
     name: string,
     functionKeys: string[],
@@ -403,4 +438,4 @@ export async function loadFunctionLibrary(client: RedisClient): Promise<void> {
   await client.sendCommand(["FUNCTION", "LOAD", "REPLACE", source]);
 }
 
-export { initializeCurrentBudgets } from "./projection.js";
+export { initializeCurrentBudgets } from "./projection";

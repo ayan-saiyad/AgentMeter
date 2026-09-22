@@ -572,6 +572,9 @@ export function buildGateway(dependencies?: GatewayDependencies) {
                   toolName: event.name,
                   decision: allowed ? "ALLOWED" : "DENIED",
                   argumentsDigest: digestToolArguments(event.arguments),
+                  costMicrodollars: BigInt(
+                    context.modelPrice.price.toolCallMicrodollars,
+                  ),
                   ...(!allowed ? { outcome: "POLICY_DENIED" } : {}),
                 },
               });

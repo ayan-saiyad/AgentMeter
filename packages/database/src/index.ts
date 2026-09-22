@@ -1,6 +1,6 @@
 export { Prisma, PrismaClient } from "@prisma/client";
-export { createApiKey, digestApiKey, findApiKey } from "./api-key.js";
-export { claimRun, createReservedRun, finalizeRun } from "./runs.js";
+export { createApiKey, digestApiKey, findApiKey } from "./api-key";
+export { claimRun, createReservedRun, finalizeRun } from "./runs";
 
 import { PrismaClient } from "@prisma/client";
 

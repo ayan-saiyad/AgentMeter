@@ -36,6 +36,7 @@ export const simulatorConfigSchema = z.object({
 export const dashboardConfigSchema = z.object({
   ADMIN_TOKEN: z.string().min(32),
   DATABASE_URL: z.string().min(1),
+  DASHBOARD_TENANT_ID: z.string().uuid().optional(),
   REDIS_URL: z.string().min(1),
 });
 
