@@ -21,6 +21,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:integration": "vitest run tests/database.integration.test.ts",
+    "test:redis": "vitest run tests/redis.integration.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
