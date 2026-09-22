@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { canTransition, computeCostBound, evaluatePolicy } from "./index.js";
+import {
+  canTransition,
+  computeActualCost,
+  computeCostBound,
+  evaluatePolicy,
+} from "./index.js";
 
 const rules = {
   allowedModels: ["simulator-v1"],
@@ -42,6 +47,23 @@ describe("cost bounds", () => {
         },
       }),
     ).toThrow(RangeError);
+  });
+
+  it("calculates final usage without a reservation margin", () => {
+    expect(
+      computeActualCost({
+        cachedTokens: 2,
+        inputTokens: 10,
+        outputTokens: 5,
+        toolCalls: 1,
+        price: {
+          cachedPerMillionMicrodollars: "500000",
+          inputPerMillionMicrodollars: "1000000",
+          outputPerMillionMicrodollars: "2000000",
+          toolCallMicrodollars: "10",
+        },
+      }),
+    ).toBe(29n);
   });
 });
 

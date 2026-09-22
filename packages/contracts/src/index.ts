@@ -51,3 +51,52 @@ export const runStatusSchema = z.enum([
 ]);
 
 export type RunStatus = z.infer<typeof runStatusSchema>;
+
+export const runRequestSchema = z.object({
+  input: z.string().min(1).max(200_000),
+  maxDurationMs: z.number().int().min(100).max(600_000),
+  maxOutputTokens: z.number().int().min(1).max(100_000),
+  metadata: z.record(z.string(), z.string().max(500)).optional(),
+  model: z.string().min(1).max(200),
+  tools: z.array(z.string().min(1).max(200)).max(50).default([]),
+});
+
+export type RunRequest = z.infer<typeof runRequestSchema>;
+
+export const providerRequestSchema = runRequestSchema.extend({
+  runId: z.string().uuid(),
+});
+
+export type ProviderRequest = z.infer<typeof providerRequestSchema>;
+
+export const providerEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("message.delta"), text: z.string() }),
+  z.object({
+    type: z.literal("tool.call"),
+    callId: z.string(),
+    name: z.string(),
+    arguments: z.record(z.string(), z.unknown()),
+  }),
+  z.object({
+    type: z.literal("usage.final"),
+    cachedTokens: z.number().int().nonnegative().default(0),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    toolCalls: z.number().int().nonnegative().default(0),
+  }),
+  z.object({
+    type: z.literal("provider.completed"),
+    providerRequestId: z.string(),
+  }),
+]);
+
+export type ProviderEvent = z.infer<typeof providerEventSchema>;
+
+export interface RunEvent {
+  data: Record<string, unknown>;
+  runId: string;
+  sequence: number;
+  timestamp: string;
+  type: string;
+  version: 1;
+}

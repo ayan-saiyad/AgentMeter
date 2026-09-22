@@ -108,6 +108,16 @@ export interface ReservationResult {
 export class RedisControl {
   constructor(readonly client: RedisClient) {}
 
+  async ping(): Promise<boolean> {
+    return (await this.client.ping()) === "PONG";
+  }
+
+  async hasBudget(tenantId: string, budgetPeriodId: string): Promise<boolean> {
+    return (
+      (await this.client.exists(keys.budget(tenantId, budgetPeriodId))) === 1
+    );
+  }
+
   async initializeBudget(input: {
     active?: number;
     admissionsOpen?: boolean;
@@ -358,3 +368,5 @@ export async function loadFunctionLibrary(client: RedisClient): Promise<void> {
   const source = await readFile(path, "utf8");
   await client.sendCommand(["FUNCTION", "LOAD", "REPLACE", source]);
 }
+
+export { initializeCurrentBudgets } from "./projection.js";

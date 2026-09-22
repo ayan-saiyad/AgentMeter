@@ -5,6 +5,8 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@agentmeter/contracts": "*",
+    "@agentmeter/database": "*",
     "redis": "6.2.1"
   }
 }

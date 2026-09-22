@@ -19,4 +19,6 @@ RUN npm ci
 
 COPY . .
 
+RUN npm run db:generate
+
 CMD ["npm", "run", "dev:gateway"]

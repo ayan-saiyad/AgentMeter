@@ -22,8 +22,10 @@ export interface ReservedRunInput {
   tenantId: string;
 }
 
+type RunWriter = Pick<PrismaClient, "agentRun">;
+
 export async function createReservedRun(
-  database: PrismaClient,
+  database: RunWriter,
   input: ReservedRunInput,
 ) {
   return database.agentRun.create({
@@ -53,7 +55,7 @@ export async function createReservedRun(
 }
 
 export async function claimRun(
-  database: PrismaClient,
+  database: RunWriter,
   runId: string,
   owner: string,
 ): Promise<boolean> {
@@ -62,7 +64,6 @@ export async function claimRun(
     data: {
       executionClaimedAt: new Date(),
       executionOwner: owner,
-      providerStartedAt: new Date(),
       status: "RUNNING",
     },
   });

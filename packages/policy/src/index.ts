@@ -57,6 +57,46 @@ export function computeCostBound(input: CostBoundInput): bigint {
   return withMargin;
 }
 
+export function computeActualCost(input: {
+  cachedTokens?: number;
+  inputTokens: number;
+  outputTokens: number;
+  price: ModelPrice;
+  toolCalls: number;
+}): bigint {
+  for (const value of [
+    input.inputTokens,
+    input.outputTokens,
+    input.cachedTokens ?? 0,
+    input.toolCalls,
+  ]) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError("Usage values must be non-negative safe integers");
+    }
+  }
+  const uncachedInput = Math.max(
+    0,
+    input.inputTokens - (input.cachedTokens ?? 0),
+  );
+  return (
+    ceilDiv(
+      BigInt(uncachedInput) * BigInt(input.price.inputPerMillionMicrodollars),
+      PER_MILLION,
+    ) +
+    ceilDiv(
+      BigInt(input.cachedTokens ?? 0) *
+        BigInt(input.price.cachedPerMillionMicrodollars),
+      PER_MILLION,
+    ) +
+    ceilDiv(
+      BigInt(input.outputTokens) *
+        BigInt(input.price.outputPerMillionMicrodollars),
+      PER_MILLION,
+    ) +
+    BigInt(input.toolCalls) * BigInt(input.price.toolCallMicrodollars)
+  );
+}
+
 export interface PolicyRequest {
   maxDurationMs: number;
   maxOutputTokens: number;

@@ -1,1 +1,55 @@
-export {};
+import {
+  providerEventSchema,
+  type ProviderEvent,
+  type ProviderRequest,
+} from "@agentmeter/contracts";
+
+export interface ProviderAdapter {
+  estimateInputTokens(input: string): number;
+  stream(
+    request: ProviderRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<ProviderEvent>;
+}
+
+export class SimulatorProvider implements ProviderAdapter {
+  constructor(private readonly baseUrl: string) {}
+
+  estimateInputTokens(input: string): number {
+    return Math.max(1, Math.ceil(input.length / 4));
+  }
+
+  async *stream(
+    request: ProviderRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<ProviderEvent> {
+    const response = await fetch(`${this.baseUrl}/v1/stream`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Provider returned ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim()) {
+          yield providerEventSchema.parse(JSON.parse(line));
+        }
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) {
+      yield providerEventSchema.parse(JSON.parse(buffer));
+    }
+  }
+}

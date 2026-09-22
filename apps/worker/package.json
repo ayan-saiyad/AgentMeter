@@ -9,6 +9,9 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@agentmeter/config": "*"
+    "@agentmeter/config": "*",
+    "@agentmeter/database": "*",
+    "@agentmeter/redis-control": "*",
+    "zod": "4.1.11"
   }
 }

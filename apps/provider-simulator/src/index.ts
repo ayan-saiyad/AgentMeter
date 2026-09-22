@@ -1,15 +1,8 @@
 import { parseConfig, simulatorConfigSchema } from "@agentmeter/config";
-import { serviceVersion } from "@agentmeter/contracts";
-import Fastify from "fastify";
+import { buildSimulator } from "./app.js";
 
 const config = parseConfig(simulatorConfigSchema);
-const app = Fastify({ logger: true });
-
-app.get("/health/live", () => ({
-  service: "provider-simulator",
-  status: "ok" as const,
-  version: serviceVersion,
-}));
+const app = buildSimulator();
 
 const stop = async () => {
   await app.close();
