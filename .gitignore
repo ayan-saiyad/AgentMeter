@@ -1,0 +1,32 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Build output
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and runtime files
+*.log
+*.pid
+tmp/
+
+# Test and benchmark output
+artifacts/
+test-results/
+k6-results/
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
