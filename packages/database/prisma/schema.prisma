@@ -1,0 +1,508 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum BudgetStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum RunStatus {
+  RESERVED
+  RUNNING
+  ABORTED
+  FAILED
+  EXPIRED
+  RECONCILING
+  SETTLED
+  CANCELLED
+}
+
+enum AdmissionDecision {
+  ACCEPTED
+  REJECTED
+  DUPLICATE
+}
+
+enum UsageEventType {
+  CHECKPOINT
+  PROVIDER_FINAL
+  TOOL
+  RECONCILIATION
+}
+
+enum SettlementEvidence {
+  PROVIDER_FINAL
+  RECONCILED
+  CONSERVATIVE_ESTIMATE
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  DEAD
+}
+
+enum ReconciliationStatus {
+  OPEN
+  RETRYING
+  RESOLVED
+  MANUAL_REVIEW
+}
+
+enum ToolDecision {
+  ALLOWED
+  DENIED
+}
+
+model Tenant {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  name                  String
+  status                TenantStatus           @default(ACTIVE)
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  memberships           TenantMembership[]
+  applications          Application[]
+  apiKeys               ApiKey[]
+  budgets               Budget[]
+  budgetPeriods         BudgetPeriod[]
+  policies              Policy[]
+  policyVersions        PolicyVersion[]
+  policyBindings        PolicyBinding[]
+  modelPrices           ModelPrice[]
+  agentRuns             AgentRun[]
+  usageEvents           UsageEvent[]
+  toolInvocations       ToolInvocation[]
+  settlements           Settlement[]
+  settlementAdjustments SettlementAdjustment[]
+  outboxEvents          OutboxEvent[]
+  admissionEvents       AdmissionEvent[]
+  reconciliationCases   ReconciliationCase[]
+  dailyUsageRollups     DailyUsageRollup[]
+  auditEvents           AuditEvent[]
+
+  @@map("tenant")
+}
+
+model User {
+  id          String             @id @default(uuid()) @db.Uuid
+  email       String             @unique
+  displayName String             @map("display_name")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  memberships TenantMembership[]
+
+  @@map("app_user")
+}
+
+model TenantMembership {
+  tenantId String @map("tenant_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  role     String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userId])
+  @@map("tenant_membership")
+}
+
+model Application {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  name              String
+  slug              String
+  enabled           Boolean            @default(true)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKeys           ApiKey[]
+  budgets           Budget[]
+  agentRuns         AgentRun[]
+  admissionEvents   AdmissionEvent[]
+  dailyUsageRollups DailyUsageRollup[]
+
+  @@unique([tenantId, slug])
+  @@unique([tenantId, id])
+  @@index([tenantId, enabled])
+  @@map("application")
+}
+
+model ApiKey {
+  id            String       @id @default(uuid()) @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  applicationId String       @map("application_id") @db.Uuid
+  name          String
+  prefix        String
+  secretDigest  String       @unique @map("secret_digest")
+  scopes        String[]
+  status        ApiKeyStatus @default(ACTIVE)
+  lastUsedAt    DateTime?    @map("last_used_at")
+  expiresAt     DateTime?    @map("expires_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  revokedAt     DateTime?    @map("revoked_at")
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application   Application  @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, prefix])
+  @@index([tenantId, applicationId, status])
+  @@map("api_key")
+}
+
+model Budget {
+  id            String         @id @default(uuid()) @db.Uuid
+  tenantId      String         @map("tenant_id") @db.Uuid
+  applicationId String?        @map("application_id") @db.Uuid
+  name          String
+  currency      String         @default("USD")
+  status        BudgetStatus   @default(ACTIVE)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application   Application?   @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Cascade)
+  periods       BudgetPeriod[]
+
+  @@unique([tenantId, name])
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@map("budget")
+}
+
+model BudgetPeriod {
+  id                String     @id @default(uuid()) @db.Uuid
+  tenantId          String     @map("tenant_id") @db.Uuid
+  budgetId          String     @map("budget_id") @db.Uuid
+  startsAt          DateTime   @map("starts_at")
+  endsAt            DateTime   @map("ends_at")
+  limitMicrodollars BigInt     @map("limit_microdollars")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  tenant            Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  budget            Budget     @relation(fields: [tenantId, budgetId], references: [tenantId, id], onDelete: Cascade)
+  agentRuns         AgentRun[]
+
+  @@unique([tenantId, budgetId, startsAt])
+  @@unique([tenantId, id])
+  @@index([tenantId, startsAt, endsAt])
+  @@map("budget_period")
+}
+
+model Policy {
+  id          String          @id @default(uuid()) @db.Uuid
+  tenantId    String          @map("tenant_id") @db.Uuid
+  name        String
+  description String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  versions    PolicyVersion[]
+  bindings    PolicyBinding[]
+
+  @@unique([tenantId, name])
+  @@unique([tenantId, id])
+  @@map("policy")
+}
+
+model PolicyVersion {
+  id        String          @id @default(uuid()) @db.Uuid
+  tenantId  String          @map("tenant_id") @db.Uuid
+  policyId  String          @map("policy_id") @db.Uuid
+  version   Int
+  rules     Json
+  createdAt DateTime        @default(now()) @map("created_at")
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  policy    Policy          @relation(fields: [tenantId, policyId], references: [tenantId, id], onDelete: Cascade)
+  bindings  PolicyBinding[]
+  agentRuns AgentRun[]
+
+  @@unique([tenantId, policyId, version])
+  @@unique([tenantId, id])
+  @@map("policy_version")
+}
+
+model PolicyBinding {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @map("tenant_id") @db.Uuid
+  policyId        String        @map("policy_id") @db.Uuid
+  policyVersionId String        @map("policy_version_id") @db.Uuid
+  targetType      String        @map("target_type")
+  targetId        String?       @map("target_id") @db.Uuid
+  priority        Int           @default(0)
+  enabled         Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  policy          Policy        @relation(fields: [tenantId, policyId], references: [tenantId, id], onDelete: Cascade)
+  policyVersion   PolicyVersion @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, targetType, targetId, enabled, priority])
+  @@map("policy_binding")
+}
+
+model ModelPrice {
+  id                           String     @id @default(uuid()) @db.Uuid
+  tenantId                     String     @map("tenant_id") @db.Uuid
+  provider                     String
+  model                        String
+  inputPerMillionMicrodollars  BigInt     @map("input_per_million_microdollars")
+  outputPerMillionMicrodollars BigInt     @map("output_per_million_microdollars")
+  cachedPerMillionMicrodollars BigInt     @default(0) @map("cached_per_million_microdollars")
+  toolCallMicrodollars         BigInt     @default(0) @map("tool_call_microdollars")
+  effectiveFrom                DateTime   @map("effective_from")
+  effectiveTo                  DateTime?  @map("effective_to")
+  createdAt                    DateTime   @default(now()) @map("created_at")
+  tenant                       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentRuns                    AgentRun[]
+
+  @@unique([tenantId, provider, model, effectiveFrom])
+  @@unique([tenantId, id])
+  @@index([tenantId, provider, model, effectiveFrom])
+  @@map("model_price")
+}
+
+model AgentRun {
+  id                   String              @id @default(uuid()) @db.Uuid
+  tenantId             String              @map("tenant_id") @db.Uuid
+  applicationId        String              @map("application_id") @db.Uuid
+  budgetPeriodId       String              @map("budget_period_id") @db.Uuid
+  policyVersionId      String?             @map("policy_version_id") @db.Uuid
+  modelPriceId         String?             @map("model_price_id") @db.Uuid
+  idempotencyDigest    String              @map("idempotency_digest")
+  status               RunStatus           @default(RESERVED)
+  provider             String
+  model                String
+  maxOutputTokens      Int                 @map("max_output_tokens")
+  maxDurationMs        Int                 @map("max_duration_ms")
+  reservedMicrodollars BigInt              @map("reserved_microdollars")
+  actualMicrodollars   BigInt              @default(0) @map("actual_microdollars")
+  inputTokens          Int                 @default(0) @map("input_tokens")
+  outputTokens         Int                 @default(0) @map("output_tokens")
+  toolCalls            Int                 @default(0) @map("tool_calls")
+  policySnapshot       Json                @map("policy_snapshot")
+  priceSnapshot        Json                @map("price_snapshot")
+  requestMetadata      Json?               @map("request_metadata")
+  executionOwner       String?             @map("execution_owner")
+  providerRequestId    String?             @map("provider_request_id")
+  executionClaimedAt   DateTime?           @map("execution_claimed_at")
+  providerStartedAt    DateTime?           @map("provider_started_at")
+  clientDisconnectedAt DateTime?           @map("client_disconnected_at")
+  failureCode          String?             @map("failure_code")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  settledAt            DateTime?           @map("settled_at")
+  tenant               Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application          Application         @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Restrict)
+  budgetPeriod         BudgetPeriod        @relation(fields: [tenantId, budgetPeriodId], references: [tenantId, id], onDelete: Restrict)
+  policyVersion        PolicyVersion?      @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict)
+  modelPrice           ModelPrice?         @relation(fields: [tenantId, modelPriceId], references: [tenantId, id], onDelete: Restrict)
+  usageEvents          UsageEvent[]
+  toolInvocations      ToolInvocation[]
+  settlement           Settlement?
+  admissionEvents      AdmissionEvent[]
+  reconciliationCase   ReconciliationCase?
+
+  @@unique([tenantId, idempotencyDigest])
+  @@unique([tenantId, id])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, applicationId, createdAt])
+  @@map("agent_run")
+}
+
+model UsageEvent {
+  id               BigInt         @id @default(autoincrement())
+  tenantId         String         @map("tenant_id") @db.Uuid
+  runId            String         @map("run_id") @db.Uuid
+  sequence         Int
+  type             UsageEventType
+  inputTokens      Int            @default(0) @map("input_tokens")
+  outputTokens     Int            @default(0) @map("output_tokens")
+  cachedTokens     Int            @default(0) @map("cached_tokens")
+  toolCalls        Int            @default(0) @map("tool_calls")
+  costMicrodollars BigInt         @default(0) @map("cost_microdollars")
+  evidence         Json?
+  occurredAt       DateTime       @default(now()) @map("occurred_at")
+  tenant           Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run              AgentRun       @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, runId, occurredAt])
+  @@map("usage_event")
+}
+
+model ToolInvocation {
+  id               String       @id @default(uuid()) @db.Uuid
+  tenantId         String       @map("tenant_id") @db.Uuid
+  runId            String       @map("run_id") @db.Uuid
+  sequence         Int
+  toolName         String       @map("tool_name")
+  decision         ToolDecision
+  argumentsDigest  String?      @map("arguments_digest")
+  outcome          String?
+  durationMs       Int?         @map("duration_ms")
+  costMicrodollars BigInt       @default(0) @map("cost_microdollars")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  completedAt      DateTime?    @map("completed_at")
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run              AgentRun     @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([tenantId, toolName, createdAt])
+  @@map("tool_invocation")
+}
+
+model Settlement {
+  id                   String                 @id @default(uuid()) @db.Uuid
+  tenantId             String                 @map("tenant_id") @db.Uuid
+  runId                String                 @unique @map("run_id") @db.Uuid
+  reservedMicrodollars BigInt                 @map("reserved_microdollars")
+  actualMicrodollars   BigInt                 @map("actual_microdollars")
+  unusedMicrodollars   BigInt                 @map("unused_microdollars")
+  evidence             SettlementEvidence
+  createdAt            DateTime               @default(now()) @map("created_at")
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run                  AgentRun               @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Restrict)
+  adjustments          SettlementAdjustment[]
+
+  @@unique([tenantId, runId])
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@map("settlement")
+}
+
+model SettlementAdjustment {
+  id                String     @id @default(uuid()) @db.Uuid
+  tenantId          String     @map("tenant_id") @db.Uuid
+  settlementId      String     @map("settlement_id") @db.Uuid
+  evidenceKey       String     @map("evidence_key")
+  deltaMicrodollars BigInt     @map("delta_microdollars")
+  reason            String
+  createdAt         DateTime   @default(now()) @map("created_at")
+  tenant            Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  settlement        Settlement @relation(fields: [tenantId, settlementId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, evidenceKey])
+  @@index([tenantId, settlementId])
+  @@map("settlement_adjustment")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  aggregateType String       @map("aggregate_type")
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  eventType     String       @map("event_type")
+  dedupeKey     String       @map("dedupe_key")
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?    @map("locked_at")
+  lockedBy      String?      @map("locked_by")
+  lastError     String?      @map("last_error")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  deliveredAt   DateTime?    @map("delivered_at")
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([eventType, dedupeKey])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("outbox_event")
+}
+
+model AdmissionEvent {
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @map("tenant_id") @db.Uuid
+  applicationId         String            @map("application_id") @db.Uuid
+  runId                 String?           @map("run_id") @db.Uuid
+  idempotencyDigest     String            @map("idempotency_digest")
+  decision              AdmissionDecision
+  reason                String
+  requestedMicrodollars BigInt            @default(0) @map("requested_microdollars")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application           Application       @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Cascade)
+  run                   AgentRun?         @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, decision, reason, createdAt])
+  @@map("admission_event")
+}
+
+model ReconciliationCase {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @map("tenant_id") @db.Uuid
+  runId         String               @unique @map("run_id") @db.Uuid
+  status        ReconciliationStatus @default(OPEN)
+  reason        String
+  attempts      Int                  @default(0)
+  nextAttemptAt DateTime             @default(now()) @map("next_attempt_at")
+  deadlineAt    DateTime             @map("deadline_at")
+  lastError     String?              @map("last_error")
+  resolution    Json?
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+  resolvedAt    DateTime?            @map("resolved_at")
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  run           AgentRun             @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, runId])
+  @@index([tenantId, status, nextAttemptAt])
+  @@map("reconciliation_case")
+}
+
+model DailyUsageRollup {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @map("tenant_id") @db.Uuid
+  applicationId    String      @map("application_id") @db.Uuid
+  day              DateTime    @db.Date
+  provider         String
+  model            String
+  runCount         Int         @default(0) @map("run_count")
+  successCount     Int         @default(0) @map("success_count")
+  failedCount      Int         @default(0) @map("failed_count")
+  abortedCount     Int         @default(0) @map("aborted_count")
+  inputTokens      BigInt      @default(0) @map("input_tokens")
+  outputTokens     BigInt      @default(0) @map("output_tokens")
+  toolCalls        BigInt      @default(0) @map("tool_calls")
+  costMicrodollars BigInt      @default(0) @map("cost_microdollars")
+  p50LatencyMs     Int?        @map("p50_latency_ms")
+  p95LatencyMs     Int?        @map("p95_latency_ms")
+  p99LatencyMs     Int?        @map("p99_latency_ms")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application      Application @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, applicationId, day, provider, model])
+  @@index([tenantId, day])
+  @@map("daily_usage_rollup")
+}
+
+model AuditEvent {
+  id           BigInt   @id @default(autoincrement())
+  tenantId     String   @map("tenant_id") @db.Uuid
+  actorType    String   @map("actor_type")
+  actorId      String   @map("actor_id")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  details      Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("audit_event")
+}

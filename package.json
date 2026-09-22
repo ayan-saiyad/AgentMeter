@@ -20,12 +20,16 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:integration": "vitest run tests/database.integration.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema packages/database/prisma/schema.prisma",
     "db:deploy": "prisma migrate deploy --schema packages/database/prisma/schema.prisma",
     "db:seed": "tsx packages/database/src/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.12.0"
   },
   "devDependencies": {
     "@eslint/js": "9.36.0",

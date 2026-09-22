@@ -5,6 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@agentmeter/contracts": "*",
     "@prisma/client": "6.12.0"
   }
 }

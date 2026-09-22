@@ -1,6 +1,4 @@
-FROM node:24-alpine
-
-RUN apk add --no-cache dumb-init
+FROM node:24.21.0-bookworm-slim
 
 WORKDIR /app
 
@@ -21,5 +19,4 @@ RUN npm ci
 
 COPY . .
 
-ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "run", "dev:gateway"]
