@@ -19,6 +19,7 @@ export const gatewayConfigSchema = commonSchema.extend({
 });
 
 export const workerConfigSchema = commonSchema.extend({
+  LEASE_TTL_MS: z.coerce.number().int().positive().default(90_000),
   LEASE_SWEEP_MS: z.coerce.number().int().positive().default(5_000),
   RECONCILIATION_DEADLINE_MS: z.coerce
     .number()

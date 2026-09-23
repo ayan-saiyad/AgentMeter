@@ -127,6 +127,19 @@ export class RedisControl {
     );
   }
 
+  async setConcurrency(
+    tenantId: string,
+    budgetPeriodId: string,
+    concurrency: number,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+      throw new RangeError("Concurrency must be a positive safe integer");
+    }
+    await this.client.hSet(keys.budget(tenantId, budgetPeriodId), {
+      concurrency: String(concurrency),
+    });
+  }
+
   async initializeBudget(input: {
     active?: number;
     admissionsOpen?: boolean;

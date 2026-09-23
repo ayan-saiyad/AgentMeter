@@ -53,6 +53,21 @@ export async function PATCH(
           details: { version: created.version },
         },
       });
+      await transaction.outboxEvent.create({
+        data: {
+          tenantId: binding.tenantId,
+          aggregateType: "policy",
+          aggregateId: binding.policyId,
+          eventType: "policy.published",
+          dedupeKey: created.id,
+          payload: {
+            maxConcurrency: rules.maxConcurrency,
+            targetId: binding.targetId,
+            targetType: binding.targetType,
+            tenantId: binding.tenantId,
+          },
+        },
+      });
       return created.version;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

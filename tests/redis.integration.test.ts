@@ -191,5 +191,9 @@ integration("atomic admission", () => {
       budget_period_id: recoveryPeriod,
       status: "RUNNING",
     });
+    await control.setConcurrency(recoveryTenant, recoveryPeriod, 7);
+    expect(
+      (await control.budgetState(recoveryTenant, recoveryPeriod)).concurrency,
+    ).toBe(7);
   });
 });

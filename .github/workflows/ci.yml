@@ -1,0 +1,49 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agentmeter
+          POSTGRES_PASSWORD: agentmeter
+          POSTGRES_USER: agentmeter
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentmeter -d agentmeter"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ADMIN_TOKEN: continuous-integration-admin-token
+      API_KEY_PEPPER: continuous-integration-api-key-pepper
+      DATABASE_URL: postgresql://agentmeter:agentmeter@127.0.0.1:5432/agentmeter?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run db:deploy
+      - run: npm run db:seed
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build --workspace @agentmeter/dashboard
+      - run: kubectl kustomize deploy/kubernetes/base >/dev/null
+      - run: kubectl kustomize deploy/kubernetes/overlays/local >/dev/null
+      - run: docker build -t agentmeter:check .

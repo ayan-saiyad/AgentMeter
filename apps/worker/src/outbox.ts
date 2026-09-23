@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@agentmeter/database";
 import type { RedisControl } from "@agentmeter/redis-control";
+import { policyRulesSchema } from "@agentmeter/contracts";
 import { z } from "zod";
 
 const settlementPayloadSchema = z.object({
@@ -8,6 +9,13 @@ const settlementPayloadSchema = z.object({
   reservedMicrodollars: z.string().regex(/^\d+$/),
   runId: z.string().uuid(),
   settlementId: z.string().uuid(),
+  tenantId: z.string().uuid(),
+});
+
+const policyPayloadSchema = z.object({
+  maxConcurrency: z.number().int().positive(),
+  targetId: z.string().uuid().nullable(),
+  targetType: z.enum(["APPLICATION", "TENANT"]),
   tenantId: z.string().uuid(),
 });
 
@@ -99,30 +107,73 @@ export async function processOutboxBatch(
   const events = await claimOutboxBatch(database, workerId, limit);
   for (const event of events) {
     try {
-      if (event.eventType !== "run.settled") {
+      if (event.eventType === "policy.published") {
+        const payload = policyPayloadSchema.parse(event.payload);
+        const now = new Date();
+        const periods = await database.budgetPeriod.findMany({
+          where: {
+            tenantId: payload.tenantId,
+            startsAt: { lte: now },
+            endsAt: { gt: now },
+            budget: {
+              status: "ACTIVE",
+              ...(payload.targetType === "APPLICATION"
+                ? { applicationId: payload.targetId }
+                : {}),
+            },
+          },
+          include: { budget: true },
+        });
+        for (const period of periods) {
+          const targets = period.budget.applicationId
+            ? [
+                {
+                  targetType: "APPLICATION",
+                  targetId: period.budget.applicationId,
+                },
+                { targetType: "TENANT", targetId: null },
+              ]
+            : [{ targetType: "TENANT", targetId: null }];
+          const binding = await database.policyBinding.findFirst({
+            where: {
+              tenantId: payload.tenantId,
+              enabled: true,
+              OR: targets,
+            },
+            include: { policyVersion: true },
+            orderBy: { priority: "desc" },
+          });
+          const concurrency = binding
+            ? policyRulesSchema.parse(binding.policyVersion.rules)
+                .maxConcurrency
+            : payload.maxConcurrency;
+          await redis.setConcurrency(payload.tenantId, period.id, concurrency);
+        }
+      } else if (event.eventType !== "run.settled") {
         throw new Error(`Unsupported outbox event ${event.eventType}`);
-      }
-      const payload = settlementPayloadSchema.parse(event.payload);
-      const result = await redis.settle({
-        actualMicrodollars: BigInt(payload.actualMicrodollars),
-        budgetPeriodId: payload.budgetPeriodId,
-        runId: payload.runId,
-        settlementId: payload.settlementId,
-        tenantId: payload.tenantId,
-      });
-      const recoveredProjection =
-        result[0] === "MISSING" &&
-        (await projectionContainsDurableState(
-          database,
-          redis,
-          payload.tenantId,
-          payload.budgetPeriodId,
-        ));
-      if (
-        !recoveredProjection &&
-        !["SETTLED", "ALREADY_APPLIED"].includes(result[0] ?? "")
-      ) {
-        throw new Error(`Redis settlement returned ${result.join(":")}`);
+      } else {
+        const payload = settlementPayloadSchema.parse(event.payload);
+        const result = await redis.settle({
+          actualMicrodollars: BigInt(payload.actualMicrodollars),
+          budgetPeriodId: payload.budgetPeriodId,
+          runId: payload.runId,
+          settlementId: payload.settlementId,
+          tenantId: payload.tenantId,
+        });
+        const recoveredProjection =
+          result[0] === "MISSING" &&
+          (await projectionContainsDurableState(
+            database,
+            redis,
+            payload.tenantId,
+            payload.budgetPeriodId,
+          ));
+        if (
+          !recoveredProjection &&
+          !["SETTLED", "ALREADY_APPLIED"].includes(result[0] ?? "")
+        ) {
+          throw new Error(`Redis settlement returned ${result.join(":")}`);
+        }
       }
       await database.outboxEvent.update({
         where: { id: event.id },

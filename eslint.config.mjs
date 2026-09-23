@@ -11,6 +11,8 @@ export default tseslint.config(
       "**/dist/**",
       "eslint.config.mjs",
       "node_modules/**",
+      "tests/fault/**",
+      "tests/k6/**",
     ],
   },
   eslint.configs.recommended,
