@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentmeter-config
+data:
+  GATEWAY_HOST: "0.0.0.0"
+  GATEWAY_PORT: "4000"
+  LEASE_RENEW_MS: "30000"
+  LEASE_SWEEP_MS: "5000"
+  LEASE_TTL_MS: "90000"
+  LIVE_EVENT_RETENTION: "1000"
+  NODE_ENV: production
+  PORT: "3000"
+  RECONCILIATION_DEADLINE_MS: "86400000"
+  SIMULATOR_PORT: "4100"
+  SIMULATOR_URL: http://provider-simulator:4100
+  WORKER_POLL_MS: "1000"

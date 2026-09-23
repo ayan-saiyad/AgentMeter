@@ -1,6 +1,7 @@
 .git
 .github
 .next
+**/.next
 coverage
 dist
 k6-results

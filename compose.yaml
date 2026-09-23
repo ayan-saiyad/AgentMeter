@@ -87,24 +87,20 @@ services:
     command: ["npm", "run", "start", "--workspace", "@agentmeter/worker"]
     environment:
       <<: *app-environment
+      LEASE_SWEEP_MS: 5000
+      RECONCILIATION_DEADLINE_MS: 86400000
+      SIMULATOR_URL: http://provider-simulator:4100
       WORKER_POLL_MS: 1000
 
   dashboard:
     <<: *app
     command:
-      [
-        "npm",
-        "run",
-        "dev",
-        "--workspace",
-        "@agentmeter/dashboard",
-        "--",
-        "--hostname",
-        "0.0.0.0",
-      ]
+      ["node", "apps/dashboard/.next/standalone/apps/dashboard/server.js"]
     environment:
       <<: *app-environment
       ADMIN_TOKEN: local-dashboard-token-change-me-now
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
     ports:
       - "3000:3000"
 
